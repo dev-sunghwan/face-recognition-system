@@ -1,0 +1,5 @@
+opencv-python
+av
+numpy
+insightface
+onnxruntime
