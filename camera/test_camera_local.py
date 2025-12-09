@@ -2,19 +2,25 @@
 
 import cv2
 import argparse
+import numpy as np
+import mediapipe as mp
+
 from rtsp_client import RTSPClient
 from decoder import H264Decoder
 from h264_rtp_parser import H264RTPParser
-from insightface.app import FaceAnalysis
+# from insightface.app import FaceAnalysis
+
 
 
 def main():
     # --- CLI arguments ---
-    parser = argparse.ArgumentParser(description="Hanwha Camera Face Detection Test")
+    parser = argparse.ArgumentParser(description="Hanwha Camera Face Detection Test (Mediapipe)")
     parser.add_argument("--ip", required=True, help="Camera IP Address")
     parser.add_argument("--user", default="admin", help="Camera Username")
     parser.add_argument("--password", default="Sunap1!!", help="Camera Password")
     parser.add_argument("--stride", type=int, default=3, help="Do detection every N frames")
+    parser.add_argument("--display_width", type=int, default=1280)
+    parser.add_argument("--display_height", type=int, default=720)
     args = parser.parse_args()
 
     camera_ip = args.ip
@@ -26,9 +32,13 @@ def main():
     rtsp_url = f"rtsp://{username}:{password}@{camera_ip}/profile2/media.smp"
     print(f"[INFO] Connecting to: {rtsp_url}")
 
-    # Initialize Face Detector
-    app = FaceAnalysis(name="buffalo_l")
-    app.prepare(ctx_id=0, det_size=(640,640))
+    # Initialize Face Detector - Mediapipe
+    mp_face = mp.solutions.face_detection
+    detector = mp_face.FaceDetection(
+        model_selection=0,
+        min_detection_confidence=0.5
+    )
+    print("[Info] Mediapipe Face Detection initialized.")
 
 
     # Initialize RTSP client + decoder
@@ -40,12 +50,15 @@ def main():
     client.play()
     client.open_rtp_socket()
 
-    parser = H264RTPParser()
+    parser_rtp = H264RTPParser()
     decoder = H264Decoder()
 
-    print("[INFO] Starting stream... Press ESC to exit")
     frame_count = 0
     last_faces = []
+
+    print("[INFO] Starting stream... Press ESC to exit")
+
+    # Main loop
 
     while True:
         packet = client.receive_rtp_packet()
@@ -55,11 +68,12 @@ def main():
         # For debugging:
         # print(f"[RTP] received: {len(packet)} bytes")
 
-        nal = parser.feed(packet)
+        nal = parser_rtp.feed(packet)
         if nal is None:
             continue
 
         frames = decoder.decode(nal)
+
         for frame in frames:
             img = frame.to_ndarray(format="bgr24")
             h, w = img.shape[:2]
@@ -70,37 +84,42 @@ def main():
 
             # 2) Detection every N frames
             if frame_count % stride == 0:
-                faces = app.get(small)
+                mp_input = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                results = detector.process(mp_input)
+
+                faces = []
+                if results.detections:
+                    for det in results.detections:
+                        bbox = det.location_data.relative_bounding_box
+
+                        xs = int(bbox.xmin * small_w)
+                        ys = int(bbox.ymin * small_h)
+                        xe = int((bbox.xmin + bbox.width) * small_w)
+                        ye = int((bbox.ymin + bbox.height) * small_h)
+
+                        # Scale back to original frame size
+                        X1 = int(xs * (w / small_w))
+                        Y1 = int(ys * (h / small_h))
+                        X2 = int(xe * (w / small_w))
+                        Y2 = int(ye * (h / small_h))
+
+                        faces.append((X1, Y1, X2, Y2))
+
                 last_faces = faces
             else:
                 faces = last_faces
             
             frame_count += 1
 
+
             # Face Detection - Draw boxes scaled to original image
-            for f in faces:
-                if f.landmark is None or f.bbox is None:
-                    continue
+            for (x1, y1, x2, y2) in faces:
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-                x1, y1, x2, y2 = f.bbox.astype(int)
-
-                # scale bbox back to original
-                x1 = int(x1 * (w / small_w))
-                x2 = int(x2 * (w / small_w))
-                y1 = int(y1 * (h / small_h))
-                y2 = int(y2 * (h / small_h))
-
-                cv2.rectangle(img, (x1,y1), (x2, y2), (0,255,0), 2)
-
-                # scale landmarks back
-                for (lx, ly) in f.landmark.astype(int):
-                    lx = int(lx * (w / small_w))
-                    ly = int(ly * (h / small_h))
-                    cv2.circle(img, (lx,ly), 2, (0,0,255), -1)
 
             # 4) Resize for display
-            display_img = cv2.resize(img, (1280, 720))
-            cv2.imshow("Face Detection - Hanwha Camera", display_img)
+            display_img = cv2.resize(img, (args.display_width, args.display_height))
+            cv2.imshow("Face Detection - Hanwha Camera - Mediapipe", display_img)
             
             if cv2.waitKey(1) == 27:  # ESC
                 return

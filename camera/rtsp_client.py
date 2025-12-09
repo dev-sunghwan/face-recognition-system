@@ -4,6 +4,7 @@ import socket
 import re
 import hashlib
 import os
+import threading
 
 
 class RTSPClient:
@@ -185,11 +186,17 @@ class RTSPClient:
         return resp
 
     def play(self):
-        return self._send_rtsp(
+        response = self._send_rtsp(
             "PLAY",
             self.video_track_uri,
             f"Session: {self.session_id}\r\n"
         )
+    
+        # Keep-alive Thread start
+        threading.Thread(target=self.keep_alive, daemon=True).start()
+
+        return response
+    
 
     # -------------------------------------------
     # RTP Socket
@@ -206,6 +213,35 @@ class RTSPClient:
             return packet
         except socket.timeout:
             return None
+
+
+    def keep_alive(self):
+        """
+        Periodically send GET_PARAMETER to prevent RTSP session timeout.
+        """
+        import time
+        
+        while True:
+            # keep-alive every 30 seconds
+            time.sleep(30)
+
+            if not self.session_id:
+                continue
+
+            msg = (
+                f"GET_PARAMETER {self.url} RTSP/1.0\r\n"
+                f"CSeq: {self.cseq}\r\n"
+                f"Session: {self.session_id}\r\n"
+                f"\r\n"
+            )
+
+            try:
+                self.socket.send(msg.encode("utf-8"))
+                print(f"[RTSP] Sent keep-alive GET_PARAMETER (CSeq {self.cseq})")
+                self.cseq += 1
+            except Exception as e:
+                print("[RTSP] Keep-alive failed:", e)
+                break
 
 
 if __name__ == "__main__":
