@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  face-recognition:
+    build: .
+    image: face-recognition-system:latest
+    container_name: face-recognition
+    environment:
+      - MODE=insightface
+      - CAMERA_IP=45.92.235.163:8082
+      - CAMERA_USER=admin
+      - CAMERA_PASSWORD=Sunap1!!
+      - STRIDE=3
+
+      # GPU 경고 숨기기
+      - GLOG_minloglevel=2
+      - TF_CPP_MIN_LOG_LEVEL=2
+    
+    # Automatic Restart
+    restart: unless-stopped
+    
+    # 로그 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

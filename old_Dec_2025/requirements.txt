@@ -1,0 +1,5 @@
+opencv-python-headless==4.8.1.78
+numpy>=1.24.0,<2.0.0
+mediapipe==0.10.9
+insightface==0.7.3
+onnxruntime==1.16.3
